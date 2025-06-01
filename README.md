@@ -38,7 +38,7 @@ You have 3 ways to install odr-audioenc on your host:
 
 ### Installing binary packages on some linux distributions
 
-[![Packaging status](https://repology.org/badge/vertical-allrepos/odr-dabmux.svg)](https://repology.org/project/odr-audioenc/versions)
+[![Packaging status](https://repology.org/badge/vertical-allrepos/odr-audioenc.svg)](https://repology.org/project/odr-audioenc/versions)
 
 ### Using installation scripts
 
