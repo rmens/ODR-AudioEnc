@@ -158,10 +158,8 @@ void EDI::add_udp_destination(const std::string& host, unsigned int port)
     auto dest = make_shared<edi::udp_destination_t>();
     dest->dest_addr = host;
     dest->dest_port = port;
+    dest->pft_settings.enable_pft = true;
     m_edi_conf.destinations.push_back(dest);
-
-    // We cannot carry AF packets over UDP, because they would be too large.
-    m_edi_conf.enable_pft = true;
 }
 
 void EDI::add_tcp_destination(const std::string& host, unsigned int port)
@@ -170,14 +168,15 @@ void EDI::add_tcp_destination(const std::string& host, unsigned int port)
     dest->dest_addr = host;
     dest->dest_port = port;
     m_edi_conf.destinations.push_back(dest);
-
-    m_edi_conf.dump = false;
 }
 
 void EDI::set_fec(int fec)
 {
-    m_edi_conf.enable_pft = true;
-    m_edi_conf.fec = fec;
+    for (auto& edi_dest : m_edi_conf.destinations) {
+        if (auto udp_dest = dynamic_pointer_cast<edi::udp_destination_t>(edi_dest)) {
+            udp_dest->pft_settings.fec = fec;
+        }
+    }
 }
 
 bool EDI::enabled() const

@@ -50,6 +50,7 @@
  */
 
 #include "config.h"
+#include "Log.h"
 #include "PadInterface.h"
 #include "AlsaInput.h"
 #include "FileInput.h"
