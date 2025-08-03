@@ -1,0 +1,170 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Tag name for release'
+        required: true
+        default: 'v0.0.0'
+
+jobs:
+  build-binaries:
+    strategy:
+      matrix:
+        include:
+          - name: minimal
+            configure_flags: ""
+            deps: "libzmq3-dev libzmq5 libcurl4-openssl-dev"
+            artifact_suffix: "minimal"
+          - name: full
+            configure_flags: "--enable-alsa --enable-jack --enable-vlc --enable-gst"
+            deps: "libzmq3-dev libzmq5 libcurl4-openssl-dev libasound2-dev libjack-jackd2-dev libvlc-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev"
+            artifact_suffix: "full"
+    
+    runs-on: ubuntu-latest
+    name: Build ${{ matrix.name }}
+    
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Get version
+      id: version
+      run: |
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          echo "version=${{ github.event.inputs.tag_name }}" >> $GITHUB_OUTPUT
+        else
+          echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential automake libtool ${{ matrix.deps }}
+
+    - name: Configure
+      run: |
+        ./bootstrap
+        ./configure --prefix=/usr ${{ matrix.configure_flags }}
+
+    - name: Build
+      run: make -j$(nproc)
+
+    - name: Create package
+      run: |
+        make DESTDIR=$PWD/install install
+        
+        # Create binary package
+        mkdir -p package/usr
+        cp -r install/usr/* package/usr/
+        
+        # Add README for the package
+        cat > package/README.md << EOF
+        # ODR-AudioEnc ${{ steps.version.outputs.version }} (${{ matrix.name }})
+        
+        DAB/DAB+ audio encoder for ODR-mmbTools.
+        
+        This is the ${{ matrix.name }} build with the following features:
+        ${{ matrix.name == 'minimal' && '- Core encoding (DAB/DAB+)\n- ZeroMQ output\n- EDI output\n- File input/output' || '- All minimal features\n- ALSA input\n- JACK input\n- VLC input (network streams)\n- GStreamer input' }}
+        
+        ## Installation
+        
+        Extract to your system:
+        \`\`\`bash
+        sudo tar -xzf odr-audioenc-${{ steps.version.outputs.version }}-${{ matrix.artifact_suffix }}-linux-x64.tar.gz -C /
+        \`\`\`
+        
+        ## Usage
+        
+        See https://github.com/Opendigitalradio/ODR-AudioEnc for documentation.
+        EOF
+        
+        # Create tarball
+        tar -czf odr-audioenc-${{ steps.version.outputs.version }}-${{ matrix.artifact_suffix }}-linux-x64.tar.gz -C package .
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: odr-audioenc-${{ matrix.artifact_suffix }}
+        path: odr-audioenc-*.tar.gz
+
+  create-release:
+    needs: build-binaries
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Get version
+      id: version
+      run: |
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          echo "version=${{ github.event.inputs.tag_name }}" >> $GITHUB_OUTPUT
+        else
+          echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Download artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+
+    - name: Generate changelog
+      id: changelog
+      run: |
+        # Extract changelog for this version if CHANGELOG exists
+        if [ -f CHANGELOG.md ]; then
+          awk '/^## / {if (p) exit; p=1; next} p' CHANGELOG.md > changelog_excerpt.md || echo "No changelog found." > changelog_excerpt.md
+        else
+          echo "No changelog found." > changelog_excerpt.md
+        fi
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ steps.version.outputs.version }}
+        name: ODR-AudioEnc ${{ steps.version.outputs.version }}
+        body: |
+          ## ODR-AudioEnc ${{ steps.version.outputs.version }}
+          
+          DAB/DAB+ audio encoder for ODR-mmbTools.
+          
+          ### Downloads
+          
+          - **Minimal build**: Core functionality with DAB/DAB+ encoding, ZeroMQ, EDI, and file I/O
+          - **Full build**: All features including ALSA, JACK, VLC, and GStreamer input support
+          
+          ### Installation
+          
+          ```bash
+          # Extract to your system
+          sudo tar -xzf odr-audioenc-${{ steps.version.outputs.version }}-<variant>-linux-x64.tar.gz -C /
+          ```
+          
+          ### Changes
+          
+          ${{ steps.changelog.outputs.content || 'See commit history for changes.' }}
+          
+          ### Requirements
+          
+          **Minimal build**:
+          - libzmq5
+          - libcurl4
+          
+          **Full build** (additional):
+          - libasound2 (ALSA)
+          - libjack-jackd2-0 (JACK)
+          - libvlc5 (VLC)
+          - libgstreamer1.0-0 (GStreamer)
+        files: |
+          artifacts/odr-audioenc-minimal/*.tar.gz
+          artifacts/odr-audioenc-full/*.tar.gz
+        draft: false
+        prerelease: false

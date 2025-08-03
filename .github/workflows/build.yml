@@ -1,0 +1,140 @@
+name: Build
+
+on:
+  push:
+    branches: [ master, develop ]
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+
+jobs:
+  build-minimal:
+    runs-on: ubuntu-latest
+    name: Build Minimal
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Install minimal dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          automake \
+          libtool \
+          libzmq3-dev \
+          libzmq5 \
+          libcurl4-openssl-dev
+
+    - name: Configure minimal build
+      run: |
+        ./bootstrap
+        ./configure --prefix=/usr/local
+
+    - name: Build
+      run: make -j$(nproc)
+
+    - name: Run tests
+      run: make check || true
+
+    - name: Create minimal artifact
+      run: |
+        make DESTDIR=$PWD/install-minimal install
+        tar -czf odr-audioenc-minimal-linux-x64.tar.gz -C install-minimal .
+
+    - name: Upload minimal artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: odr-audioenc-minimal
+        path: odr-audioenc-minimal-linux-x64.tar.gz
+
+  build-full:
+    runs-on: ubuntu-latest
+    name: Build Full Featured
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Install full dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          automake \
+          libtool \
+          libzmq3-dev \
+          libzmq5 \
+          libcurl4-openssl-dev \
+          libasound2-dev \
+          libjack-jackd2-dev \
+          libvlc-dev \
+          libgstreamer1.0-dev \
+          libgstreamer-plugins-base1.0-dev
+
+    - name: Configure full build
+      run: |
+        ./bootstrap
+        ./configure --prefix=/usr/local \
+          --enable-alsa \
+          --enable-jack \
+          --enable-vlc \
+          --enable-gst
+
+    - name: Build
+      run: make -j$(nproc)
+
+    - name: Run tests
+      run: make check || true
+
+    - name: Create full artifact
+      run: |
+        make DESTDIR=$PWD/install-full install
+        tar -czf odr-audioenc-full-linux-x64.tar.gz -C install-full .
+
+    - name: Upload full artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: odr-audioenc-full
+        path: odr-audioenc-full-linux-x64.tar.gz
+
+  static-analysis:
+    runs-on: ubuntu-latest
+    name: Static Analysis
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Install analysis tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cppcheck clang-tidy-14 \
+          build-essential automake libtool libzmq3-dev
+
+    - name: Configure for analysis
+      run: |
+        ./bootstrap
+        ./configure
+
+    - name: Run cppcheck
+      run: |
+        cppcheck --enable=all --error-exitcode=0 \
+          --suppress=missingIncludeSystem \
+          --suppress=unmatchedSuppression \
+          src/ 2>&1 | tee cppcheck.log
+
+    - name: Run clang-tidy
+      run: |
+        find src -name "*.cpp" -o -name "*.h" | \
+          xargs clang-tidy-14 -p . 2>&1 | tee clang-tidy.log || true
+
+    - name: Upload analysis logs
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: static-analysis-logs
+        path: |
+          cppcheck.log
+          clang-tidy.log

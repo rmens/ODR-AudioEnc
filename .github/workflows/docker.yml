@@ -1,0 +1,157 @@
+name: Docker Images
+
+on:
+  push:
+    branches: [ master ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-docker:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    
+    strategy:
+      matrix:
+        include:
+          - variant: minimal
+            dockerfile: Dockerfile.minimal
+          - variant: full
+            dockerfile: Dockerfile.full
+    
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Create Dockerfile for ${{ matrix.variant }}
+      run: |
+        if [ "${{ matrix.variant }}" = "minimal" ]; then
+          cat > ${{ matrix.dockerfile }} << 'EOF'
+        FROM ubuntu:22.04 AS builder
+
+        RUN apt-get update && apt-get install -y --no-install-recommends \
+            build-essential \
+            automake \
+            libtool \
+            libzmq3-dev \
+            libcurl4-openssl-dev \
+            ca-certificates \
+            && rm -rf /var/lib/apt/lists/*
+
+        WORKDIR /build
+        COPY . .
+
+        RUN ./bootstrap && \
+            ./configure --prefix=/usr/local && \
+            make -j$(nproc) && \
+            make install
+
+        FROM ubuntu:22.04
+        
+        RUN apt-get update && apt-get install -y --no-install-recommends \
+            libzmq5 \
+            libcurl4 \
+            ca-certificates \
+            && rm -rf /var/lib/apt/lists/*
+
+        COPY --from=builder /usr/local /usr/local
+
+        ENTRYPOINT ["odr-audioenc"]
+        EOF
+        else
+          cat > ${{ matrix.dockerfile }} << 'EOF'
+        FROM ubuntu:22.04 AS builder
+
+        RUN apt-get update && apt-get install -y --no-install-recommends \
+            build-essential \
+            automake \
+            libtool \
+            libzmq3-dev \
+            libcurl4-openssl-dev \
+            libasound2-dev \
+            libjack-jackd2-dev \
+            libvlc-dev \
+            libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev \
+            ca-certificates \
+            && rm -rf /var/lib/apt/lists/*
+
+        WORKDIR /build
+        COPY . .
+
+        RUN ./bootstrap && \
+            ./configure --prefix=/usr/local \
+              --enable-alsa \
+              --enable-jack \
+              --enable-vlc \
+              --enable-gst && \
+            make -j$(nproc) && \
+            make install
+
+        FROM ubuntu:22.04
+        
+        RUN apt-get update && apt-get install -y --no-install-recommends \
+            libzmq5 \
+            libcurl4 \
+            libasound2 \
+            libjack-jackd2-0 \
+            libvlc5 \
+            vlc-plugin-base \
+            libgstreamer1.0-0 \
+            gstreamer1.0-plugins-base \
+            gstreamer1.0-plugins-good \
+            ca-certificates \
+            && rm -rf /var/lib/apt/lists/*
+
+        COPY --from=builder /usr/local /usr/local
+
+        ENTRYPOINT ["odr-audioenc"]
+        EOF
+        fi
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to Container Registry
+      if: github.event_name != 'pull_request'
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        flavor: |
+          suffix=-${{ matrix.variant }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=semver,pattern={{major}}
+          type=edge,branch=master
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ${{ matrix.dockerfile }}
+        push: ${{ github.event_name != 'pull_request' }}
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
