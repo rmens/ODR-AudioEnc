@@ -63,6 +63,7 @@
 #include "common.h"
 #include "wavfile.h"
 #include "utils.h"
+#include "AudioEncLogger.h"
 
 extern "C" {
 #include "encryption.h"
@@ -212,6 +213,8 @@ static void usage(const char* name)
     "     -S, --stats=SOCKET_NAME              Connect to the specified UNIX Datagram socket and send statistics.\n"
     "                                          This allows external tools to collect audio and drift compensation stats.\n"
     "     -s, --silence=TIMEOUT                Abort encoding after TIMEOUT seconds of silence.\n"
+    "         --log-level=LEVEL                Set logging level: debug, info, warn, error, alert, emerg (default: warn)\n"
+    "         --syslog                         Send logs to syslog instead of stderr.\n"
     "         --version                        Show version and quit.\n"
     "\n"
     );
@@ -236,13 +239,13 @@ static int prepare_aac_encoder(
         case 1: mode = MODE_1; break;
         case 2: mode = MODE_2; break;
         default:
-                fprintf(stderr, "Unsupported channels number %d\n", channels);
+                AudioEncLog::Logger::instance().error() << "Unsupported channels number " << channels;
                 return 1;
     }
 
 
     if (aacEncOpen(encoder, 0x01|0x02|0x04, channels) != AACENC_OK) {
-        fprintf(stderr, "Unable to open encoder\n");
+        AudioEncLog::Logger::instance().error() << "Unable to open encoder";
         return 1;
     }
 
@@ -260,72 +263,71 @@ static int prepare_aac_encoder(
         }
     }
 
-    fprintf(stderr, "Using %d subchannels. AAC type: %s%s%s. channels=%d, sample_rate=%d\n",
-            subchannel_index,
-            *aot == AOT_DABPLUS_PS ? "HE-AAC v2" : "",
-            *aot == AOT_DABPLUS_SBR ? "HE-AAC" : "",
-            *aot == AOT_DABPLUS_AAC_LC ? "AAC-LC" : "",
-            channels, sample_rate);
+    AudioEncLog::Logger::instance().info() << "Using " << subchannel_index << " subchannels. AAC type: " <<
+            (*aot == AOT_DABPLUS_PS ? "HE-AAC v2" : "") <<
+            (*aot == AOT_DABPLUS_SBR ? "HE-AAC" : "") <<
+            (*aot == AOT_DABPLUS_AAC_LC ? "AAC-LC" : "") <<
+            ". channels=" << channels << ", sample_rate=" << sample_rate;
 
     if (aacEncoder_SetParam(*encoder, AACENC_AOT, *aot) != AACENC_OK) {
-        fprintf(stderr, "Unable to set the AOT\n");
+        AudioEncLog::Logger::instance().error() << "Unable to set the AOT";
         return 1;
     }
     if (aacEncoder_SetParam(*encoder, AACENC_SAMPLERATE, sample_rate) != AACENC_OK) {
-        fprintf(stderr, "Unable to set the sample rate\n");
+        AudioEncLog::Logger::instance().error() << "Unable to set the sample rate";
         return 1;
     }
     if (aacEncoder_SetParam(*encoder, AACENC_CHANNELMODE, mode) != AACENC_OK) {
-        fprintf(stderr, "Unable to set the channel mode\n");
+        AudioEncLog::Logger::instance().error() << "Unable to set the channel mode";
         return 1;
     }
     if (aacEncoder_SetParam(*encoder, AACENC_CHANNELORDER, 1) != AACENC_OK) {
-        fprintf(stderr, "Unable to set the wav channel order\n");
+        AudioEncLog::Logger::instance().error() << "Unable to set the wav channel order";
         return 1;
     }
     if (aacEncoder_SetParam(*encoder, AACENC_GRANULE_LENGTH, 960) != AACENC_OK) {
-        fprintf(stderr, "Unable to set the granule length\n");
+        AudioEncLog::Logger::instance().error() << "Unable to set the granule length";
         return 1;
     }
     if (aacEncoder_SetParam(*encoder, AACENC_TRANSMUX, TT_DABPLUS) != AACENC_OK) {
-        fprintf(stderr, "Unable to set the RAW transmux\n");
+        AudioEncLog::Logger::instance().error() << "Unable to set the RAW transmux";
         return 1;
     }
 
     /*if (aacEncoder_SetParam(*encoder, AACENC_BITRATEMODE, AACENC_BR_MODE_SFR)
      * != AACENC_OK) {
-        fprintf(stderr, "Unable to set the bitrate mode\n");
+        AudioEncLog::Logger::instance().error() << "Unable to set the bitrate mode";
         return 1;
     }*/
 
 
-    fprintf(stderr, "AAC bitrate set to: %d\n", subchannel_index*8000);
+    AudioEncLog::Logger::instance().info() << "AAC bitrate set to: " << subchannel_index*8000;
     if (aacEncoder_SetParam(*encoder, AACENC_BITRATE, subchannel_index*8000) != AACENC_OK) {
-        fprintf(stderr, "Unable to set the bitrate\n");
+        AudioEncLog::Logger::instance().error() << "Unable to set the bitrate";
         return 1;
     }
     if (aacEncoder_SetParam(*encoder, AACENC_AFTERBURNER, afterburner) != AACENC_OK) {
-        fprintf(stderr, "Unable to set the afterburner mode\n");
+        AudioEncLog::Logger::instance().error() << "Unable to set the afterburner mode";
         return 1;
     }
     if (!afterburner) {
-        fprintf(stderr, "Warning: Afterburned disabled!\n");
+        AudioEncLog::Logger::instance().warn() << "Warning: Afterburner disabled!";
     }
 
     if (bandwidth > 0) {
-        fprintf(stderr, "Setting bandwidth is %d\n", bandwidth);
+        AudioEncLog::Logger::instance().info() << "Setting bandwidth is " << bandwidth;
         if (aacEncoder_SetParam(*encoder, AACENC_BANDWIDTH, bandwidth) != AACENC_OK) {
-            fprintf(stderr, "Unable to set bandwidth mode\n");
+            AudioEncLog::Logger::instance().error() << "Unable to set bandwidth mode";
             return 1;
         }
     }
     if (aacEncEncode(*encoder, nullptr, nullptr, nullptr, nullptr) != AACENC_OK) {
-        fprintf(stderr, "Unable to initialize the encoder\n");
+        AudioEncLog::Logger::instance().error() << "Unable to initialize the encoder";
         return 1;
     }
 
     const uint32_t bw = aacEncoder_GetParam(*encoder, AACENC_BANDWIDTH);
-    fprintf(stderr, "Bandwidth is %d\n", bw);
+    AudioEncLog::Logger::instance().info() << "Bandwidth is " << bw;
 
     return 0;
 }
@@ -526,11 +528,11 @@ int AudioEnc::run()
 #endif
 
     if (num_inputs == 0) {
-        fprintf(stderr, "No input defined!\n");
+        AudioEncLog::Logger::instance().error() << "No input defined!";
         return 1;
     }
     else if (num_inputs > 1) {
-        fprintf(stderr, "You must define only one possible input, not several!\n");
+        AudioEncLog::Logger::instance().error() << "You must define only one possible input, not several!";
         return 1;
     }
 
@@ -542,13 +544,12 @@ int AudioEnc::run()
         int subchannel_index = bitrate / 8;
 
         if (subchannel_index < 1 || subchannel_index > 24) {
-            fprintf(stderr, "Bad subchannel index: %d, must be between 1 and 24. Try other bitrate.\n",
-                    subchannel_index);
+            AudioEncLog::Logger::instance().error() << "Bad subchannel index: " << subchannel_index << ", must be between 1 and 24. Try other bitrate.";
             return 1;
         }
 
         if ( ! (sample_rate == 32000 || sample_rate == 48000)) {
-            fprintf(stderr, "Invalid sample rate. Possible values are: 32000, 48000.\n");
+            AudioEncLog::Logger::instance().error() << "Invalid sample rate. Possible values are: 32000, 48000.";
             return 1;
         }
     }
@@ -558,25 +559,25 @@ int AudioEnc::run()
         }
 
         if ( ! (sample_rate == 24000 || sample_rate == 48000)) {
-            fprintf(stderr, "Invalid sample rate. Possible values are: 24000, 48000.\n");
+            AudioEncLog::Logger::instance().error() << "Invalid sample rate. Possible values are: 24000, 48000.";
             return 1;
         }
     }
 
     if (padlen < 0 or padlen > 255) {
-        fprintf(stderr, "Invalid PAD length specified\n");
+        AudioEncLog::Logger::instance().error() << "Invalid PAD length specified";
         return 1;
     }
 
     if (output_uris.empty() and edi_output_uris.empty()) {
-        fprintf(stderr, "No output defined\n");
+        AudioEncLog::Logger::instance().error() << "No output defined";
         return 1;
     }
 
     for (const auto& uri : output_uris) {
         if (uri == "-") {
             if (file_output) {
-                fprintf(stderr, "You can't write to more than one file!\n");
+                AudioEncLog::Logger::instance().error() << "You can't write to more than one file!";
                 return 1;
             }
             file_output = make_shared<Output::File>(stdout);
@@ -594,7 +595,7 @@ int AudioEnc::run()
         }
         else { // We assume it's a file name
             if (file_output) {
-                fprintf(stderr, "You can't write to more than one file!\n");
+                AudioEncLog::Logger::instance().error() << "You can't write to more than one file!";
                 return 1;
             }
             file_output = make_shared<Output::File>(uri.c_str());
@@ -621,11 +622,11 @@ int AudioEnc::run()
                 }
             }
             else {
-                fprintf(stderr, "Invalid EDI URL host!\n");
+                AudioEncLog::Logger::instance().error() << "Invalid EDI URL host!";
             }
         }
         else {
-            fprintf(stderr, "Invalid EDI protocol!\n");
+            AudioEncLog::Logger::instance().error() << "Invalid EDI protocol!";
         }
     }
 
@@ -650,10 +651,10 @@ int AudioEnc::run()
 
     if (padlen != 0 and not pad_ident.empty()) {
         pad_intf.open(pad_ident);
-        fprintf(stderr, "PAD socket opened\n");
+        AudioEncLog::Logger::instance().info() << "PAD socket opened";
     }
     else {
-        fprintf(stderr, "PAD disabled because neither PAD length nor PAD identifier given\n");
+        AudioEncLog::Logger::instance().info() << "PAD disabled because neither PAD length nor PAD identifier given";
     }
 
     vec_u8 input_buf;
@@ -662,20 +663,18 @@ int AudioEnc::run()
         int subchannel_index = bitrate / 8;
         if (prepare_aac_encoder(&encoder, subchannel_index, channels,
                     sample_rate, afterburner, bandwidth, &aot) != 0) {
-            fprintf(stderr, "Encoder preparation failed\n");
+            AudioEncLog::Logger::instance().error() << "Encoder preparation failed";
             return 1;
         }
 
         if (aacEncInfo(encoder, &info) != AACENC_OK) {
-            fprintf(stderr, "Unable to get the encoder info\n");
+            AudioEncLog::Logger::instance().error() << "Unable to get the encoder info";
             return 1;
         }
 
         // Each DAB+ frame will need input_size audio bytes
         const int input_size = channels * BYTES_PER_SAMPLE * info.frameLength;
-        fprintf(stderr, "DAB+ Encoding: framelen=%d (%dB)\n",
-                info.frameLength,
-                input_size);
+        AudioEncLog::Logger::instance().info() << "DAB+ Encoding: framelen=" << info.frameLength << " (" << input_size << "B)";
 
         input_buf.resize(input_size);
 
@@ -702,8 +701,7 @@ int AudioEnc::run()
                 dab_channel_mode = 'm'; // Default to mono
             }
             else {
-                fprintf(stderr, "Unsupported channels number %d\n",
-                        channels);
+                AudioEncLog::Logger::instance().error() << "Unsupported channels number " << channels;
                 return 1;
             }
         }
@@ -722,14 +720,14 @@ int AudioEnc::run()
         }
 
         if (err) {
-            fprintf(stderr, "libtoolame-dab init failed: %d\n", err);
+            AudioEncLog::Logger::instance().error() << "libtoolame-dab init failed: " << err;
             return err;
         }
 
         input_buf.resize(channels * 1152 * BYTES_PER_SAMPLE);
 
         if (not decode_wavfilename.empty()) {
-            fprintf(stderr, "--decode not supported for DAB\n");
+            AudioEncLog::Logger::instance().error() << "--decode not supported for DAB";
             return 1;
         }
     }
@@ -741,7 +739,7 @@ int AudioEnc::run()
             stats_publisher.reset(s);
         }
         catch (const runtime_error& e) {
-            fprintf(stderr, "Failed to initialise Stats Publisher: %s", e.what());
+            AudioEncLog::Logger::instance().error() << "Failed to initialise Stats Publisher: " << e.what();
             if (s != nullptr) {
                 delete s;
             }
@@ -777,7 +775,7 @@ int AudioEnc::run()
         input = initialise_input();
     }
     catch (const runtime_error& e) {
-        fprintf(stderr, "Initialising input triggered exception: %s\n", e.what());
+        AudioEncLog::Logger::instance().error() << "Initialising input triggered exception: " << e.what();
         return 1;
     }
 
@@ -796,18 +794,18 @@ int AudioEnc::run()
         case encoder_selection_t::toolame_dab:
             outbuf_size = 4092;
             outbuf.resize(outbuf_size);
-            fprintf(stderr, "Setting outbuf size to %zu\n", outbuf.size());
+            AudioEncLog::Logger::instance().info() << "Setting outbuf size to " << outbuf.size();
             break;
     }
 
     vector<uint8_t> pad_buf(padlen + 1);
 
     if (restart_on_fault) {
-        fprintf(stderr, "Autorestart has been deprecated and will be removed in the future!\n");
+        AudioEncLog::Logger::instance().warn() << "Autorestart has been deprecated and will be removed in the future!";
         this_thread::sleep_for(chrono::seconds(2));
     }
 
-    fprintf(stderr, "Starting encoding\n");
+    AudioEncLog::Logger::instance().info() << "Starting encoding";
 
     int retval = 0;
     int send_error_count = 0;
@@ -846,7 +844,7 @@ int AudioEnc::run()
                 copy(pad_data.begin(), pad_data.end(), pad_buf.begin());
             }
             else {
-                fprintf(stderr, "Incorrect PAD length received: %zu expected %d\n", pad_data.size(), padlen + 1);
+                AudioEncLog::Logger::instance().error() << "Incorrect PAD length received: " << pad_data.size() << " expected " << (padlen + 1);
                 break;
             }
         }
@@ -873,13 +871,13 @@ int AudioEnc::run()
          */
 
         if (input->fault_detected()) {
-            fprintf(stderr, "Detected fault in input!\n");
+            AudioEncLog::Logger::instance().error() << "Detected fault in input!";
 
             if (restart_on_fault) {
                 fault_counter++;
 
                 if (fault_counter >= MAX_FAULTS_ALLOWED) {
-                    fprintf(stderr, "Maximum number of input faults reached, aborting");
+                    AudioEncLog::Logger::instance().error() << "Maximum number of input faults reached, aborting";
                     retval = 5;
                     break;
                 }
@@ -888,7 +886,7 @@ int AudioEnc::run()
                     input = initialise_input();
                 }
                 catch (const runtime_error& e) {
-                    fprintf(stderr, "Initialising input triggered exception: %s\n", e.what());
+                    AudioEncLog::Logger::instance().error() << "Initialising input triggered exception: " << e.what();
                     retval = 5;
                     break;
                 }
@@ -902,7 +900,7 @@ int AudioEnc::run()
         }
 
         if (not input->read_source(input_buf.size())) {
-            fprintf(stderr, "End of input reached\n");
+            AudioEncLog::Logger::instance().info() << "End of input reached";
             retval = 0;
             break;
         }
@@ -926,7 +924,7 @@ int AudioEnc::run()
                 const auto elapsed = chrono::duration_cast<chrono::seconds>(
                         now - timepoint_last_received_sample);
                 if (elapsed.count() > 60) {
-                    fprintf(stderr, "Underruns for 60s, aborting!\n");
+                    AudioEncLog::Logger::instance().error() << "Underruns for 60s, aborting!";
                     return 1;
                 }
             }
@@ -957,13 +955,13 @@ int AudioEnc::run()
 
             if (bytes_from_queue < read_bytes) {
                 // queue timeout occurred
-                fprintf(stderr, "Detected fault in input! No data in time.\n");
+                AudioEncLog::Logger::instance().error() << "Detected fault in input! No data in time.";
 
                 if (restart_on_fault) {
                     fault_counter++;
 
                     if (fault_counter >= MAX_FAULTS_ALLOWED) {
-                        fprintf(stderr, "Maximum number of input faults reached, aborting");
+                        AudioEncLog::Logger::instance().error() << "Maximum number of input faults reached, aborting";
                         retval = 5;
                         break;
                     }
@@ -972,7 +970,7 @@ int AudioEnc::run()
                         input = initialise_input();
                     }
                     catch (const runtime_error& e) {
-                        fprintf(stderr, "Initialising input triggered exception: %s\n", e.what());
+                        AudioEncLog::Logger::instance().error() << "Initialising input triggered exception: " << e.what();
                         return 1;
                     }
 
@@ -1011,7 +1009,7 @@ int AudioEnc::run()
                 bool success = write_icy_to_file(text, icytext_file, icytext_dlplus);
 
                 if (not success) {
-                    fprintf(stderr, "Failed to write ICY Text\n");
+                    AudioEncLog::Logger::instance().error() << "Failed to write ICY Text";
                 }
             }
 
@@ -1068,8 +1066,7 @@ int AudioEnc::run()
             measured_silence_ms += frame_time_msec;
 
             if (measured_silence_ms > 1000*silence_timeout) {
-                fprintf(stderr, "Silence detected for %d seconds, aborting.\n",
-                        silence_timeout);
+                AudioEncLog::Logger::instance().error() << "Silence detected for " << silence_timeout << " seconds, aborting.";
                 retval = 2;
                 break;
             }
@@ -1121,10 +1118,10 @@ int AudioEnc::run()
             if ((err = aacEncEncode(encoder, &in_buf, &out_buf, &in_args, &out_args))
                     != AACENC_OK) {
                 if (err == AACENC_ENCODE_EOF) {
-                    fprintf(stderr, "encoder error: EOF reached\n");
+                    AudioEncLog::Logger::instance().error() << "encoder error: EOF reached";
                     break;
                 }
-                fprintf(stderr, "Encoding failed (%d)\n", err);
+                AudioEncLog::Logger::instance().error() << "Encoding failed (" << err << ")";
                 retval = 3;
                 break;
             }
@@ -1151,7 +1148,7 @@ int AudioEnc::run()
                 }
             }
             else {
-                fprintf(stderr, "INTERNAL ERROR! invalid number of channels\n");
+                AudioEncLog::Logger::instance().error() << "INTERNAL ERROR! invalid number of channels";
             }
 
             if (read_bytes) {
@@ -1167,7 +1164,7 @@ int AudioEnc::run()
                 decoder->decode_frame(outbuf.data(), numOutBytes);
             }
             catch (runtime_error &e) {
-                fprintf(stderr, "Decoding failed with: %s\n", e.what());
+                AudioEncLog::Logger::instance().error() << "Decoding failed with: " << e.what();
                 return 1;
             }
         }
@@ -1181,8 +1178,7 @@ int AudioEnc::run()
 
             // Our timing code depends on this
             if (calls != enc_calls_per_output) {
-                fprintf(stderr, "INTERNAL ERROR! calls=%d, expected %d\n",
-                        calls, enc_calls_per_output);
+                AudioEncLog::Logger::instance().error() << "INTERNAL ERROR! calls=" << calls << ", expected " << enc_calls_per_output;
             }
             calls = 0;
 
@@ -1218,7 +1214,7 @@ int AudioEnc::run()
 
                 bool success = send_frame(frame.data(), frame.size(), peak_left, peak_right);
                 if (not success) {
-                    fprintf(stderr, "Send error !\n");
+                    AudioEncLog::Logger::instance().error() << "Send error !";
                     send_error_count ++;
                 }
             }
@@ -1226,13 +1222,13 @@ int AudioEnc::run()
         else if (numOutBytes > 0 and selected_encoder == encoder_selection_t::fdk_dabplus) {
             bool success = send_frame(outbuf.data(), numOutBytes, peak_left, peak_right);
             if (not success) {
-                fprintf(stderr, "Send error !\n");
+                AudioEncLog::Logger::instance().error() << "Send error !";
                 send_error_count ++;
             }
         }
 
         if (send_error_count > 10) {
-            fprintf(stderr, "Send failed ten times, aborting!\n");
+            AudioEncLog::Logger::instance().error() << "Send failed ten times, aborting!";
             retval = 4;
             break;
         }
@@ -1422,6 +1418,8 @@ int main(int argc, char *argv[])
         {"restart",                no_argument,        0, 'R'},
         {"sbr",                    no_argument,        0,  1 },
         {"verbosity",              no_argument,        0, 'V'},
+        {"log-level",              required_argument,  0, 13 },
+        {"syslog",                 no_argument,        0, 14 },
         {0, 0, 0, 0},
     };
 
@@ -1436,27 +1434,11 @@ int main(int argc, char *argv[])
         return 0;
     }
 
-    fprintf(stderr,
-            "Welcome to %s %s, compiled at %s, %s",
-            PACKAGE_NAME,
-#if defined(GITVERSION)
-            GITVERSION,
-#else
-            PACKAGE_VERSION,
-#endif
-            __DATE__, __TIME__);
-    fprintf(stderr, "\n");
-    fprintf(stderr, "  http://opendigitalradio.org\n\n");
-
-
-    if (argc < 2) {
-        usage(argv[0]);
-        return 1;
-    }
-
     AudioEnc audio_enc;
 
     std::string startupcheck;
+    AudioEncLog::LogLevel log_level = AudioEncLog::LogLevel::Warn;
+    bool use_syslog = false;
 
     int ch=0;
     int index;
@@ -1483,7 +1465,7 @@ int main(int argc, char *argv[])
                         audio_enc.dab_channel_mode == "d" or
                         audio_enc.dab_channel_mode == "j" or
                         audio_enc.dab_channel_mode == "m")) {
-                fprintf(stderr, "Invalid DAB channel mode\n");
+                AudioEncLog::Logger::instance().error() << "Invalid DAB channel mode";
                 usage(argv[0]);
                 return 1;
             }
@@ -1499,7 +1481,7 @@ int main(int argc, char *argv[])
             /* The 32 character length restriction is arbitrary, but guarantees
              * that the EDI packet will not grow too large */
             if (audio_enc.identifier.size() > 32) {
-                fprintf(stderr, "Output Identifier too long!\n");
+                AudioEncLog::Logger::instance().error() << "Output Identifier too long!";
                 usage(argv[0]);
                 return 1;
             }
@@ -1509,6 +1491,20 @@ int main(int argc, char *argv[])
             break;
         case 12: // --edi-verbose
             audio_enc.edi_output.set_verbose(true);
+            break;
+        case 13: // --log-level
+            {
+                try {
+                    log_level = AudioEncLog::parse_log_level(optarg);
+                } catch (const std::invalid_argument& e) {
+                    AudioEncLog::Logger::instance().error() << e.what();
+                    usage(argv[0]);
+                    return 1;
+                }
+            }
+            break;
+        case 14: // --syslog
+            use_syslog = true;
             break;
         case 9: // --startup-check
             startupcheck = optarg;
@@ -1551,7 +1547,7 @@ int main(int argc, char *argv[])
             }
             break;
         case 10:
-            fprintf(stderr, "WARNING: the --vlc-gain option has been deprecated in favour of --audio-gain\n");
+            AudioEncLog::Logger::instance().warn() << "WARNING: the --vlc-gain option has been deprecated in favour of --audio-gain";
             // fallthrough
         case 'g':
             audio_enc.gain_dB = std::stod(optarg);
@@ -1571,7 +1567,7 @@ int main(int argc, char *argv[])
 #if HAVE_JACK
             audio_enc.jack_name = optarg;
 #else
-            fprintf(stderr, "JACK disabled at compile time!\n");
+            AudioEncLog::Logger::instance().error() << "JACK disabled at compile time!";
             return 1;
 #endif
             break;
@@ -1602,7 +1598,7 @@ int main(int argc, char *argv[])
                 audio_enc.die_on_silence = true;
             }
             else {
-                fprintf(stderr, "Invalid silence timeout (%d) given!\n", audio_enc.silence_timeout);
+                AudioEncLog::Logger::instance().error() << "Invalid silence timeout (" << audio_enc.silence_timeout << ") given!";
                 return 1;
             }
 
@@ -1628,7 +1624,7 @@ int main(int argc, char *argv[])
             break;
 #else
         case 'v':
-            fprintf(stderr, "VLC input not enabled at compile time!\n");
+            AudioEncLog::Logger::instance().error() << "VLC input not enabled at compile time!";
             return 1;
 #endif
         case 'V':
@@ -1641,21 +1637,45 @@ int main(int argc, char *argv[])
         }
     }
 
+    // Configure logging
+    AudioEncLog::Logger::instance().set_level(log_level);
+    
+    if (use_syslog) {
+        AudioEncLog::Logger::instance().use_syslog();
+    }
+    else {
+        AudioEncLog::Logger::instance().use_stderr();
+    }
+
+    AudioEncLog::Logger::instance().info() << "Welcome to " << PACKAGE_NAME << " " <<
+#if defined(GITVERSION)
+            GITVERSION <<
+#else
+            PACKAGE_VERSION <<
+#endif
+            ", compiled at " << __DATE__ << ", " << __TIME__;
+    AudioEncLog::Logger::instance().info() << "  http://opendigitalradio.org";
+
+    if (argc < 2) {
+        usage(argv[0]);
+        return 1;
+    }
+
     if (not startupcheck.empty()) {
-        etiLog.level(info) << "Running startup check '" << startupcheck << "'";
+        AudioEncLog::Logger::instance().info() << "Running startup check '" << startupcheck << "'";
         int wstatus = system(startupcheck.c_str());
 
         if (WIFEXITED(wstatus)) {
             if (WEXITSTATUS(wstatus) == 0) {
-                etiLog.level(info) << "Startup check ok";
+                AudioEncLog::Logger::instance().info() << "Startup check ok";
             }
             else {
-                etiLog.level(error) << "Startup check failed, returned " << WEXITSTATUS(wstatus);
+                AudioEncLog::Logger::instance().error() << "Startup check failed, returned " << WEXITSTATUS(wstatus);
                 return 1;
             }
         }
         else {
-            etiLog.level(error) << "Startup check failed, child didn't terminate normally";
+            AudioEncLog::Logger::instance().error() << "Startup check failed, child didn't terminate normally";
             return 1;
         }
     }
@@ -1664,7 +1684,7 @@ int main(int argc, char *argv[])
         return audio_enc.run();
     }
     catch (const std::runtime_error& e) {
-        fprintf(stderr, "ODR-AudioEnc failed to start: %s\n", e.what());
+        AudioEncLog::Logger::instance().error() << "ODR-AudioEnc failed to start: " << e.what();
         return 1;
     }
 }

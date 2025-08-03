@@ -18,6 +18,7 @@
 
 #include "config.h"
 #include "StatsPublish.h"
+#include "AudioEncLogger.h"
 #include <stdexcept>
 #include <sstream>
 #include <cstring>
@@ -122,20 +123,19 @@ void StatsPublisher::send_stats()
                 or errno == ECONNREFUSED
                 or errno == ENOENT) {
             if (m_destination_available) {
-                fprintf(stderr, "Stats destination not available at %s\n", m_socket_path.c_str());
+                AudioEncLog::Logger::instance().warn() << "Stats destination not available at " << m_socket_path;
                 m_destination_available = false;
             }
         }
         else {
-            fprintf(stderr, "Statistics send failed: %s\n", strerror(errno));
+            AudioEncLog::Logger::instance().error() << "Statistics send failed: " << strerror(errno);
         }
     }
     else if (ret != (ssize_t)jsonstr.size()) {
-        fprintf(stderr, "Statistics send incorrect length: %d bytes of %zu transmitted\n",
-                ret, jsonstr.size());
+        AudioEncLog::Logger::instance().error() << "Statistics send incorrect length: " << ret << " bytes of " << jsonstr.size() << " transmitted";
     }
     else if (not m_destination_available) {
-        fprintf(stderr, "Stats destination is now available at %s\n", m_socket_path.c_str());
+        AudioEncLog::Logger::instance().info() << "Stats destination is now available at " << m_socket_path;
         m_destination_available = true;
     }
 

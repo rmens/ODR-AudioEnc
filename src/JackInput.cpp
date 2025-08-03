@@ -28,6 +28,7 @@ extern "C" {
 }
 
 #include "JackInput.h"
+#include "AudioEncLogger.h"
 #include <sys/time.h>
 
 using namespace std;
@@ -60,7 +61,7 @@ void JackInput::prepare()
     }
 
     if (status & JackServerStarted) {
-        fprintf(stderr, "JACK server started\n");
+        AudioEncLog::Logger::instance().info() << "JACK server started";
     }
 
     if (status & JackNameNotUnique) {

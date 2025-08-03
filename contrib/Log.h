@@ -31,6 +31,10 @@
 #   include "config.h"
 #endif
 
+#ifndef PACKAGE_NAME
+#define PACKAGE_NAME "odr-audioenc"
+#endif
+
 #include <syslog.h>
 #include <cstdarg>
 #include <cstdio>
@@ -53,6 +57,13 @@ enum log_level_t {debug = 0, info, warn, error, alert, emerg, trace, discard};
 
 static const std::string levels_as_str[] =
     { "     ", "     ", "WARN ", "ERROR", "ALERT", "EMERG", "TRACE", "-----"} ;
+
+// Unified log level text array for consistent naming across all backends
+static const char* log_level_names[] = {
+    "DEBUG", "INFO", "WARN", "ERROR", "ALERT", "EMERG", "TRACE", "DISCARD"};
+
+// Helper function to parse log level from string
+log_level_t parse_log_level(const std::string& level_str);
 
 /** Abstract class all backends must inherit from */
 class LogBackend {
@@ -121,7 +132,7 @@ class LogLine;
 struct log_message_t {
     log_message_t(log_level_t _level, std::string&& _message) :
         level(_level),
-        message(move(_message)) {}
+        message(std::move(_message)) {}
 
     log_message_t() :
         level(debug),
@@ -139,6 +150,9 @@ class Logger {
         ~Logger();
 
         void register_backend(std::shared_ptr<LogBackend> backend);
+
+        /* Set the minimum log level */
+        void set_min_level(log_level_t level);
 
         /* Log the message to all backends */
         void log(log_level_t level, const char* fmt, ...);
@@ -158,11 +172,26 @@ class Logger {
         ThreadsafeQueue<log_message_t> m_message_queue;
         std::thread m_io_thread;
         std::mutex m_backend_mutex;
+        log_level_t m_min_log_level = debug;
 };
 
 /* etiLog is a singleton used in all parts of the program to output log messages.
  * It is constructed in Globals.cpp */
 extern Logger etiLog;
+
+/** Configuration class to encapsulate logging settings */
+class LoggerConfig {
+public:
+    LoggerConfig() : level(warn), use_syslog(false), use_file(false) {}
+    
+    log_level_t level;
+    bool use_syslog;
+    bool use_file;
+    std::string file_path;
+    std::string trace_path;
+    
+    void configure_logger(Logger& logger) const;
+};
 
 // Accumulate a line of logs, using same syntax as stringstream
 // The line is logged when the LogLine gets destroyed

@@ -21,6 +21,7 @@
 #if HAVE_ALSA
 
 #include "AlsaInput.h"
+#include "AudioEncLogger.h"
 #include <cstdio>
 #include <stdexcept>
 #include <string>
@@ -51,7 +52,7 @@ void AlsaInput::m_init_alsa()
     int err;
     snd_pcm_hw_params_t *hw_params;
 
-    fprintf(stderr, "Initialising ALSA...\n");
+    AudioEncLog::Logger::instance().info() << "Initialising ALSA...";
 
     const int open_mode = 0;
 
@@ -104,7 +105,7 @@ void AlsaInput::m_init_alsa()
                 alsa_strerror(err) + ")");
     }
 
-    fprintf(stderr, "ALSA init done.\n");
+    AudioEncLog::Logger::instance().info() << "ALSA init done.";
 }
 
 ssize_t AlsaInput::m_read(uint8_t* buf, snd_pcm_uframes_t length)
@@ -115,11 +116,10 @@ ssize_t AlsaInput::m_read(uint8_t* buf, snd_pcm_uframes_t length)
 
     if (err != (ssize_t)length) {
         if (err < 0) {
-            fprintf (stderr, "read from audio interface failed (%s)\n",
-                    snd_strerror(err));
+            AudioEncLog::Logger::instance().error() << "read from audio interface failed (" << snd_strerror(err) << ")";
         }
         else {
-            fprintf(stderr, "short alsa read: %d\n", err);
+            AudioEncLog::Logger::instance().warn() << "short alsa read: " << err;
         }
     }
 
@@ -141,7 +141,7 @@ AlsaInputThreaded::~AlsaInputThreaded()
 void AlsaInputThreaded::prepare()
 {
     if (m_fault) {
-        fprintf(stderr, "Cannot start alsa input. Fault detected previsouly!\n");
+        AudioEncLog::Logger::instance().error() << "Cannot start alsa input. Fault detected previsouly!";
     }
     else {
         m_init_alsa();

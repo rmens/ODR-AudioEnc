@@ -18,6 +18,7 @@
 
 #include "config.h"
 #include "PadInterface.h"
+#include "AudioEncLogger.h"
 #include <stdexcept>
 #include <sstream>
 #include <cstring>
@@ -58,7 +59,7 @@ void PadInterface::open(const std::string& pad_ident)
     claddr.sun_family = AF_UNIX;
     snprintf(claddr.sun_path, sizeof(claddr.sun_path), "/tmp/%s.audioenc", m_pad_ident.c_str());
     if (unlink(claddr.sun_path) == -1 and errno != ENOENT) {
-        fprintf(stderr, "Unlinking of socket %s failed: %s\n", claddr.sun_path, strerror(errno));
+        AudioEncLog::Logger::instance().warn() << "Unlinking of socket " << claddr.sun_path << " failed: " << strerror(errno);
     }
 
     const auto ret = ::bind(m_sock, (const struct sockaddr *) &claddr, sizeof(struct sockaddr_un));
@@ -96,20 +97,19 @@ vector<uint8_t> PadInterface::request(uint8_t padlen)
                 or errno == ECONNREFUSED
                 or errno == ENOENT) {
             if (m_padenc_reachable) {
-                fprintf(stderr, "ODR-PadEnc at %s not reachable\n", claddr.sun_path);
+                AudioEncLog::Logger::instance().warn() << "ODR-PadEnc at " << claddr.sun_path << " not reachable";
                 m_padenc_reachable = false;
             }
         }
         else {
-            fprintf(stderr, "PAD request send failed: %s\n", strerror(errno));
+            AudioEncLog::Logger::instance().error() << "PAD request send failed: " << strerror(errno);
         }
     }
     else if (ret != sizeof(packet)) {
-        fprintf(stderr, "PAD request incorrect length sent: %zu bytes of %zu transmitted\n",
-                ret, sizeof(packet));
+        AudioEncLog::Logger::instance().error() << "PAD request incorrect length sent: " << ret << " bytes of " << sizeof(packet) << " transmitted";
     }
     else if (not m_padenc_reachable) {
-        fprintf(stderr, "ODR-PadEnc is now reachable at %s\n", claddr.sun_path);
+        AudioEncLog::Logger::instance().info() << "ODR-PadEnc is now reachable at " << claddr.sun_path;
         m_padenc_reachable = true;
     }
 

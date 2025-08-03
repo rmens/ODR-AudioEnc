@@ -26,6 +26,7 @@
 #include <cstring>
 
 #include "GSTInput.h"
+#include "AudioEncLogger.h"
 
 #include "config.h"
 
@@ -282,7 +283,7 @@ void GSTInput::process()
                 {
                     GError *err = nullptr;
                     gst_message_parse_error(msg, &err, nullptr);
-                    fprintf(stderr, "GST error: %s\n", err->message);
+                    AudioEncLog::Logger::instance().error() << "GST error: " << err->message;
                     g_error_free(err);
                     m_fault = true;
                     break;

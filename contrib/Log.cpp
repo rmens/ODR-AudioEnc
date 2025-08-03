@@ -30,11 +30,42 @@
 #include <cstdarg>
 #include <cinttypes>
 #include <chrono>
+#include <algorithm>
 
 #include "Log.h"
 
 using namespace std;
 
+log_level_t parse_log_level(const std::string& level_str) {
+    std::string lower_level = level_str;
+    std::transform(lower_level.begin(), lower_level.end(), lower_level.begin(), ::tolower);
+    
+    if (lower_level == "debug") return debug;
+    else if (lower_level == "info") return info;
+    else if (lower_level == "warn") return warn;
+    else if (lower_level == "error") return error;
+    else if (lower_level == "alert") return alert;
+    else if (lower_level == "emerg") return emerg;
+    else if (lower_level == "trace") return trace;
+    else if (lower_level == "discard") return discard;
+    else throw std::invalid_argument("Invalid log level: " + level_str);
+}
+
+void LoggerConfig::configure_logger(Logger& logger) const {
+    logger.set_min_level(level);
+    
+    if (use_syslog) {
+        logger.register_backend(std::make_shared<LogToSyslog>());
+    }
+    
+    if (use_file && !file_path.empty()) {
+        logger.register_backend(std::make_shared<LogToFile>(file_path));
+    }
+    
+    if (!trace_path.empty()) {
+        logger.register_backend(std::make_shared<LogTracer>(trace_path));
+    }
+}
 
 Logger::Logger()
 {
@@ -55,10 +86,14 @@ void Logger::register_backend(std::shared_ptr<LogBackend> backend)
     backends.push_back(backend);
 }
 
+void Logger::set_min_level(log_level_t level)
+{
+    m_min_log_level = level;
+}
 
 void Logger::log(log_level_t level, const char* fmt, ...)
 {
-    if (level == discard) {
+    if (level == discard || level < m_min_log_level) {
         return;
     }
 
@@ -80,17 +115,17 @@ void Logger::log(log_level_t level, const char* fmt, ...)
             size *= 2;
     }
 
-    logstr(level, move(str));
+    logstr(level, std::move(str));
 }
 
 void Logger::logstr(log_level_t level, std::string&& message)
 {
-    if (level == discard) {
+    if (level == discard || level < m_min_log_level) {
         return;
     }
 
-    log_message_t m(level, move(message));
-    m_message_queue.push(move(m));
+    log_message_t m(level, std::move(message));
+    m_message_queue.push(std::move(m));
 }
 
 void Logger::io_process()
@@ -118,12 +153,6 @@ void Logger::io_process()
             for (auto &backend : backends) {
                 backend->log(m.level, message);
             }
-
-            if (m.level != log_level_t::trace) {
-                using namespace std::chrono;
-                time_t t = system_clock::to_time_t(system_clock::now());
-                cerr << put_time(std::gmtime(&t), "%Y-%m-%dZ%H:%M:%S") << " " << levels_as_str[m.level] << " " << message << endl;
-            }
         }
     }
 }
@@ -148,12 +177,9 @@ LogToFile::LogToFile(const std::string& filename) : name("FILE")
 void LogToFile::log(log_level_t level, const std::string& message)
 {
     if (not (level == log_level_t::trace or level == log_level_t::discard)) {
-        const char* log_level_text[] = {
-            "DEBUG", "INFO", "WARN", "ERROR", "ALERT", "EMERG"};
-
         // fprintf is thread-safe
         fprintf(log_file.get(), SYSLOG_IDENT ": %s: %s\n",
-                log_level_text[(size_t)level], message.c_str());
+                log_level_names[(size_t)level], message.c_str());
         fflush(log_file.get());
     }
 }

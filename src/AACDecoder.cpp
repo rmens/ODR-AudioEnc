@@ -20,6 +20,7 @@
 
 #include "config.h"
 #include "AACDecoder.h"
+#include "AudioEncLogger.h"
 #include <stdexcept>
 #include <string>
 
@@ -45,7 +46,7 @@ void AACDecoder::decode_frame(uint8_t *data, size_t len)
     const int core_ch_config = aac_channel_mode ? 2 : 1;
     const int extension_sr_index = dac_rate ? 3 : 5;    // 48/32 kHz
 
-    int au_start[6] = {};
+    int au_start[7] = {}; // 6 AUs + 1 for end marker
 
     int num_aus = dac_rate ? (sbr_flag ? 3 : 6) : (sbr_flag ? 2 : 4);
     au_start[0] = dac_rate ? (sbr_flag ? 6 : 11) : (sbr_flag ? 5 : 8);
@@ -107,15 +108,13 @@ void AACDecoder::decode_frame(uint8_t *data, size_t len)
         m_channels = (aac_channel_mode or ps_flag) ? 2 : 1;
         size_t output_frame_len = 960 * 2 * m_channels * (sbr_flag ? 2 : 1);
         m_output_frame.resize(output_frame_len);
-        fprintf(stderr, "  Setting decoder output frame len %zu\n", output_frame_len);
+        AudioEncLog::Logger::instance().info() << "  Setting decoder output frame len " << output_frame_len;
 
         const int sample_rate = dac_rate ? 48000 : 32000;
         m_wav_writer.initialise_header(sample_rate, m_channels);
         m_decoder_set_up = true;
 
-        fprintf(stderr, "  Set up decoder with %d Hz, %s%swith %d channels\n",
-                sample_rate, (sbr_flag ? "SBR " : ""), (ps_flag ? "PS " : ""),
-                m_channels);
+        AudioEncLog::Logger::instance().info() << "  Set up decoder with " << sample_rate << " Hz, " << (sbr_flag ? "SBR " : "") << (ps_flag ? "PS " : "") << "with " << m_channels << " channels";
 
     }
 
